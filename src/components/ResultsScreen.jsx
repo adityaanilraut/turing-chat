@@ -3,13 +3,12 @@ import useGame from '../engine/gameStore';
 import { Skull, Trophy, RefreshCcw } from 'lucide-react';
 
 const ResultsScreen = () => {
-  const { userPlayer, players, resetGame } = useGame();
-  
-  // Victory if user is alive (meaning all bots are eliminated)
-  // Loss if user is eliminated
-  const userAlive = userPlayer?.status === 'ALIVE';
-  const aliveBotsCount = players.filter(p => p.status === 'ALIVE' && !p.isHuman).length;
-  const isVictory = userAlive && aliveBotsCount === 0;
+  const { players, resetGame, outcome, outcomeReason, mode } = useGame();
+
+  const isVictory = outcome === 'WIN';
+  const defaultReason = isVictory
+    ? 'You successfully maintained your cover. The system accepts your identity.'
+    : 'Your anomaly score exceeded the threshold. Protocol terminated.';
 
   return (
     <div className="flex flex-col items-center justify-center p-8 text-center animate-in zoom-in duration-500">
@@ -22,10 +21,11 @@ const ResultsScreen = () => {
         <h1 className={`text-5xl font-bold ${isVictory ? 'text-yellow-400' : 'text-red-500'} glow`}>
           {isVictory ? 'MISSION_SUCCESS' : 'ELIMINATED'}
         </h1>
+        <p className="text-xs uppercase tracking-widest mt-2 text-green-500/60">
+          MODE: {mode}
+        </p>
         <p className="text-xl mt-4 max-w-md mx-auto text-green-300 opacity-80">
-          {isVictory 
-            ? "You successfully maintained your cover. The system accepts your identity." 
-            : "Your anomaly score exceeded the threshold. Protocol terminated."}
+          {outcomeReason || defaultReason}
         </p>
       </div>
 
@@ -44,7 +44,7 @@ const ResultsScreen = () => {
         ))}
       </div>
 
-      <button 
+      <button
         onClick={resetGame}
         className="flex items-center gap-2 px-8 py-3 bg-green-700 hover:bg-green-600 text-white rounded font-bold tracking-widest transition-all"
       >

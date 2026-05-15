@@ -58,7 +58,7 @@ Respond in this exact format:
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: votePrompt }],
-      model: 'gpt-5-nano', // Faster model for voting
+      model: 'gpt-5.4-mini',
     });
 
     const raw = completion.choices[0].message.content;
@@ -132,7 +132,7 @@ Write a brief, factual summary:`;
   try {
     const completion = await openai.chat.completions.create({
       messages: [{ role: 'user', content: summaryPrompt }],
-      model: 'gpt-5-nano',
+      model: 'gpt-5.4-mini',
     });
 
     return `Round ${roundNumber}: ${completion.choices[0].message.content.trim()}`;
@@ -146,7 +146,8 @@ export const generateBotResponse = async (apiKey, personality, chatHistory, roun
   if (!apiKey) {
     return {
       thought: "API Key missing... Cannot compute.",
-      content: "[SYSTEM ERROR: NO API KEY]"
+      content: "[SYSTEM ERROR: NO API KEY]",
+      error: 'NO_API_KEY'
     };
   }
 
@@ -155,15 +156,19 @@ export const generateBotResponse = async (apiKey, personality, chatHistory, roun
     dangerouslyAllowBrowser: true // Client-side only for this game demo
   });
 
+  const memoryBlock = roundMemory
+    ? `\n\nMEMORY FROM PREVIOUS ROUNDS (use this to stay consistent):\n${roundMemory}`
+    : '';
+
   const messages = [
-    { role: 'system', content: personality.systemPrompt + "\n" + COMMON_PROMPT },
+    { role: 'system', content: personality.systemPrompt + "\n" + COMMON_PROMPT + memoryBlock },
     ...chatHistory
   ];
 
   try {
     const completion = await openai.chat.completions.create({
       messages: messages,
-      model: 'gpt-5-nano', 
+      model: 'gpt-5.4-mini', 
     });
 
     const raw = completion.choices[0].message.content;
@@ -182,9 +187,12 @@ export const generateBotResponse = async (apiKey, personality, chatHistory, roun
 
   } catch (error) {
     console.error("OpenAI Error:", error);
+    const status = error?.status || error?.response?.status;
+    const isAuth = status === 401 || /api key/i.test(error?.message || '');
     return {
       thought: "Connection interrupted...",
-      content: "..." // Glitch effect can handle this
+      content: isAuth ? "[INVALID API KEY — check your settings]" : "[network error]",
+      error: isAuth ? 'INVALID_API_KEY' : 'NETWORK'
     };
   }
 };

@@ -64,7 +64,7 @@ const getVoiceForBot = (botId) => {
  * @returns {Promise<void>}
  */
 export const speak = (text, speakerId, options = {}) => {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       console.warn('Speech synthesis not supported');
       resolve();

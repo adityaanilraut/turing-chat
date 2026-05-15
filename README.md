@@ -21,18 +21,30 @@ You're a human trying to prove your existence. Convince the group you're real wh
 3. **Chat with 4 AI bots** - each with unique personalities
 4. **5 minutes on the clock** - make your case
 5. **Voting phase** - everyone votes to eliminate one player
-6. **Survive to win**
+6. **Bots remember** - each round's events are summarized and fed to the bots next round
+7. **Survive to win** (mode-specific — see below)
+
+### Win Conditions
+
+| Mode | You win when... | You lose when... |
+|------|-----------------|------------------|
+| HUMANITY_DEFENSE | All bots are voted out | You are voted out |
+| IMPOSTOR_PROTOCOL | Only you + 1 bot remain | The bots vote you out |
 
 ## 🧠 Bot Personalities
 
 | Role | Behavior |
 |------|----------|
-| Skeptic | Suspicious of everyone, asks sharp questions |
-| Gamer | Chill vibes, uses slang (bruh, fr, cap) |
-| Boomer | Polite but confused by technology... |
-| Logic | Analytical, fact-driven, denies being robotic |
-| Mimic | Desperate to fit in, agrees with previous speaker |
-| Chaos | Random, unpredictable responses |
+| Skeptic | Suspicious, asks pointed questions, won't let inconsistencies slide |
+| Gamer | Chill vibes, casual slang ("ngl", "lowkey", "sus") |
+| Newbie | Friendly but confused, asks for clarification, trusts easily |
+| Analyst | Logical pattern-spotter, statistical framing |
+| Peacekeeper | Builds bridges, finds common ground, dislikes conflict |
+| Deflector | Charming and evasive, redirects attention smoothly |
+
+## 🔊 Voice Mode
+
+Toggle the speaker icon in the chat header to have bot messages spoken aloud via the Web Speech API. Each bot is assigned a consistent voice/pitch based on its ID.
 
 ## 🛠️ Tech Stack
 
@@ -41,7 +53,8 @@ You're a human trying to prove your existence. Convince the group you're real wh
 - **Zustand** - State management
 - **Tailwind CSS** - Styling
 - **Framer Motion** - Animations
-- **OpenAI API** - GPT-4o-mini for bot responses
+- **OpenAI API** - `gpt-5.4-mini` for bot responses, voting, and round summaries
+- **Web Speech API** - Optional TTS for bot messages
 - **Lucide React** - Icons
 
 ## 🚀 Getting Started
@@ -77,7 +90,7 @@ npm run preview
 ```
 src/
 ├── components/
-│   ├── ChatInterface.jsx   # Main game chat UI
+│   ├── ChatInterface.jsx   # Main game chat UI + roster + voice toggle
 │   ├── Layout.jsx          # CRT terminal wrapper
 │   ├── MainMenu.jsx        # Start screen & API key input
 │   ├── ResultsScreen.jsx   # Win/lose screen
@@ -86,7 +99,8 @@ src/
 ├── engine/
 │   ├── gameStore.js        # Zustand state management
 │   ├── openai.js           # OpenAI API integration
-│   └── personalities.js    # Bot personality definitions
+│   ├── personalities.js    # Bot personality + mode definitions
+│   └── speech.js           # Web Speech API wrapper for TTS
 ├── App.jsx
 ├── main.jsx
 └── index.css               # Terminal aesthetics & animations

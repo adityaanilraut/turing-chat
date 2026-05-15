@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import useGame from '../engine/gameStore';
 import { generateBotVote } from '../engine/openai';
 import { AlertTriangle, UserX, Brain, Vote } from 'lucide-react';
@@ -70,20 +70,28 @@ const VotingOverlay = ({ onVoteComplete }) => {
       }
     });
 
-    // Find winner (most votes)
-    let maxVotes = -1;
-    let eliminatedId = null;
-    
-    Object.entries(votes).forEach(([pid, count]) => {
-      if (count > maxVotes) {
-        maxVotes = count;
-        eliminatedId = pid;
-      }
+    // Find winner (most votes); break ties randomly among the leaders.
+    let maxVotes = 0;
+    Object.values(votes).forEach((count) => {
+      if (count > maxVotes) maxVotes = count;
     });
+
+    const leaders = Object.entries(votes)
+      .filter(([, count]) => count === maxVotes && count > 0)
+      .map(([pid]) => pid);
+
+    let eliminatedId = null;
+    if (leaders.length === 1) {
+      eliminatedId = leaders[0];
+    } else if (leaders.length > 1) {
+      eliminatedId = leaders[Math.floor(Math.random() * leaders.length)];
+    }
 
     // Show result briefly then eliminate
     await new Promise(r => setTimeout(r, 1500));
-    eliminatePlayer(eliminatedId);
+    if (eliminatedId) {
+      eliminatePlayer(eliminatedId);
+    }
     onVoteComplete(eliminatedId);
   };
 
