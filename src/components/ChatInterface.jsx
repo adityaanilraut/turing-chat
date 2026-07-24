@@ -1,323 +1,372 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { AlertCircle, Cpu, LogOut, Send, Volume2, VolumeX } from 'lucide-react';
 import useGame from '../engine/gameStore';
-
-import { generateBotResponse, generateRoundSummary } from '../engine/openai';
-import { speak, stopSpeaking, isSpeechSupported } from '../engine/speech';
-import ThoughtBubble from './ThoughtBubble';
-import VotingOverlay from './VotingOverlay';
+import { getGameOutcome, isActiveTurn } from '../engine/gameRules';
+import {
+  buildChatHistory,
+  generateBotResponse,
+  generateRoundSummary,
+  MAX_MESSAGE_LENGTH,
+} from '../engine/openai';
+import { isSpeechSupported, speak, stopSpeaking } from '../engine/speech';
 import ResultsScreen from './ResultsScreen';
-import { Send, Cpu, Volume2, VolumeX, AlertCircle } from 'lucide-react';
+import VotingOverlay from './VotingOverlay';
 
 const ChatInterface = () => {
   const {
-    players, messages, currentRound, isThinking,
-    addMessage, setThinking, apiKey, userPlayer, mode,
-    turnQueue, activePlayerIndex, nextTurn, timeLeft, setTimeLeft,
-    startVoting, endVoting, isVoting, nextRound,
-    voiceEnabled, toggleVoice,
-    addRoundSummary, getRoundMemory,
-    outcome, setOutcome,
+    players, messages, currentRound, isThinking, userPlayer, mode,
+    turnQueue, activePlayerIndex, timeLeft, roundDeadline, isVoting,
+    voiceEnabled, outcome,
   } = useGame();
-
   const [input, setInput] = useState('');
   const [apiError, setApiError] = useState('');
-  const bottomRef = useRef(null);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isThinking]);
-
-  // Stop any ongoing speech if voice gets toggled off
-  useEffect(() => {
-    if (!voiceEnabled) stopSpeaking();
-  }, [voiceEnabled]);
-
-  // Timer
-  useEffect(() => {
-    if (timeLeft > 0 && !isVoting && players.length > 0 && !outcome) {
-      const timer = setInterval(() => {
-        setTimeLeft(timeLeft - 1);
-      }, 1000);
-      return () => clearInterval(timer);
-    } else if (timeLeft === 0 && !isVoting && !outcome) {
-      startVoting();
-    }
-  }, [timeLeft, isVoting, players, setTimeLeft, startVoting, outcome]);
-
-  // Bot turn
-  useEffect(() => {
-    if (isVoting || outcome) return;
-
-    const currentPlayerId = turnQueue[activePlayerIndex];
-    if (!currentPlayerId) return;
-
-    const currentPlayer = players.find(p => p.id === currentPlayerId);
-    if (!currentPlayer || currentPlayer.status !== 'ALIVE') {
-      nextTurn();
-      return;
-    }
-
-    if (!currentPlayer.isHuman && !isThinking) {
-      const runBotTurn = async () => {
-        setThinking(true);
-
-        const response = await generateBotResponse(
-          apiKey,
-          currentPlayer,
-          messages.map((m) => {
-            const name =
-              m?.name ?? (m?.sender === 'SYSTEM' ? 'SYSTEM' : String(m?.sender ?? 'UNKNOWN'));
-            const text = String(m?.text ?? '')
-              .replace(/<thought>[\s\S]*?<\/thought>/g, '')
-              .trim();
-            return {
-              role: 'user',
-              content: `${name}: ${text}`,
-            };
-          }),
-          getRoundMemory()
-        );
-
-        if (response.error === 'INVALID_API_KEY' || response.error === 'NO_API_KEY') {
-          setApiError(response.content);
-        } else if (response.error) {
-          setApiError('Network error talking to OpenAI. Retrying on next turn.');
-        } else {
-          setApiError('');
-        }
-
-        addMessage({
-          sender: currentPlayer.id,
-          text: response.content,
-          thought: response.thought,
-          isUser: false,
-          avatar: currentPlayer.avatar,
-          name: currentPlayer.name
-        });
-
-        if (voiceEnabled && isSpeechSupported() && !response.error) {
-          // Don't await — let it play in background while game proceeds
-          speak(response.content, currentPlayer.id).catch(() => {});
-        }
-
-        setThinking(false);
-        nextTurn();
-      };
-      runBotTurn();
-    }
-  }, [activePlayerIndex, isVoting, turnQueue, players, isThinking, apiKey, messages, addMessage, setThinking, nextTurn, getRoundMemory, voiceEnabled, outcome]);
-
-  const handleSend = async () => {
-    const currentPlayerId = turnQueue[activePlayerIndex];
-    if (currentPlayerId !== 'user' || isVoting || outcome) return;
-    if (!input.trim()) return;
-
-    addMessage({ sender: 'user', text: input, isUser: true, name: userPlayer?.name || 'Player' });
-    setInput('');
-    nextTurn();
-  };
-
-  const handleVoteComplete = async (eliminatedId) => {
-    endVoting();
-
-    if (!eliminatedId) {
-      addMessage({ sender: 'SYSTEM', text: 'No consensus reached. No one was eliminated this round.' });
-      nextRound();
-      return;
-    }
-
-    const eliminatedPlayer = players.find(p => p.id === eliminatedId);
-    addMessage({
-      sender: 'SYSTEM',
-      text: `${eliminatedPlayer?.name || 'Unknown'} has been eliminated.`
-    });
-
-    // Build a round summary for bot memory before checking win conditions
-    try {
-      const summary = await generateRoundSummary(
-        apiKey,
-        messages,
-        eliminatedPlayer?.name || 'Unknown',
-        currentRound
-      );
-      addRoundSummary(summary);
-    } catch (err) {
-      console.warn('Failed to generate round summary', err);
-    }
-
-    // Determine outcome based on mode
-    const userJustEliminated = eliminatedId === 'user';
-    const aliveAfter = players.filter(p => p.status === 'ALIVE' && p.id !== eliminatedId);
-    const aliveBotsAfter = aliveAfter.filter(p => !p.isHuman).length;
-    const userAliveAfter = !userJustEliminated;
-
-    if (mode === 'IMPOSTOR') {
-      // Impostor: lose if you're voted out (the bots found you).
-      // Win if you survive until only you + 1 bot remain (you outlasted the swarm).
-      if (userJustEliminated) {
-        setOutcome('LOSS', 'The bots identified you as the human impostor.');
-        return;
-      }
-      if (userAliveAfter && aliveBotsAfter <= 1) {
-        setOutcome('WIN', 'You outlasted the swarm. The bots never figured you out.');
-        return;
-      }
-    } else {
-      // Defense: lose if voted out. Win if all bots eliminated.
-      if (userJustEliminated) {
-        setOutcome('LOSS', 'The group voted you out. Your humanity went undefended.');
-        return;
-      }
-      if (userAliveAfter && aliveBotsAfter === 0) {
-        setOutcome('WIN', 'All AIs identified. Humanity defended.');
-        return;
-      }
-    }
-
-    nextRound();
-  };
-
-  if (players.length === 0) return null;
-
-  if (outcome) {
-    return <ResultsScreen />;
-  }
+  const [retryNonce, setRetryNonce] = useState(0);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const messagesRef = useRef(null);
+  const inputRef = useRef(null);
+  const shouldAutoScrollRef = useRef(true);
+  const botRequestRef = useRef(null);
+  const summaryControllerRef = useRef(null);
 
   const currentPlayerId = turnQueue[activePlayerIndex];
   const isMyTurn = currentPlayerId === 'user';
+
+  useEffect(() => {
+    if (!shouldAutoScrollRef.current) {
+      setHasNewMessages(true);
+      return;
+    }
+    const region = messagesRef.current;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    region?.scrollTo({ top: region.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [messages, isThinking]);
+
+  useEffect(() => {
+    if (!voiceEnabled || outcome) stopSpeaking();
+  }, [voiceEnabled, outcome]);
+
+  useEffect(() => {
+    if (isMyTurn && !isVoting && !apiError && window.matchMedia('(pointer: fine)').matches) {
+      inputRef.current?.focus();
+    }
+  }, [isMyTurn, isVoting, apiError]);
+
+  useEffect(() => () => {
+    botRequestRef.current?.controller.abort();
+    summaryControllerRef.current?.abort();
+    stopSpeaking();
+  }, []);
+
+  useEffect(() => {
+    if (!roundDeadline || isVoting || outcome || players.length === 0) return undefined;
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((roundDeadline - Date.now()) / 1000));
+      const state = useGame.getState();
+      state.setTimeLeft(remaining);
+      if (remaining === 0) state.startVoting();
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [roundDeadline, isVoting, outcome, players.length]);
+
+  const runBotTurn = useEffectEvent(async (player, round, controller, requestId) => {
+    const state = useGame.getState();
+    state.setThinking(true);
+
+    try {
+      const response = await generateBotResponse(
+        state.apiKey,
+        player,
+        buildChatHistory(state.messages, round),
+        state.getRoundMemory(),
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+
+      const latest = useGame.getState();
+      if (!isActiveTurn(latest, player.id, round)) return;
+
+      if (response.error) {
+        setApiError(response.content);
+        return;
+      }
+
+      setApiError('');
+      latest.addMessage({
+        sender: player.id,
+        text: response.content,
+        isUser: false,
+        avatar: player.avatar,
+        name: player.name,
+        round,
+      });
+      if (latest.voiceEnabled && isSpeechSupported()) {
+        speak(response.content, player.id).catch(() => {});
+      }
+      latest.nextTurn();
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        console.error('Bot turn failed:', error);
+        setApiError('The bot turn failed. Retry or return to setup.');
+      }
+    } finally {
+      if (botRequestRef.current?.id === requestId) {
+        botRequestRef.current = null;
+        useGame.getState().setThinking(false);
+      }
+    }
+  });
+
+  useEffect(() => {
+    if (isVoting || outcome || !currentPlayerId) return undefined;
+    const player = useGame.getState().players.find((candidate) => candidate.id === currentPlayerId);
+    if (!player || player.isHuman || player.status !== 'ALIVE') {
+      if (player?.status !== 'ALIVE') useGame.getState().nextTurn();
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const requestId = Symbol('bot-turn');
+    botRequestRef.current = { controller, id: requestId };
+    const timer = window.setTimeout(
+      () => runBotTurn(player, currentRound, controller, requestId),
+      0,
+    );
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [currentPlayerId, currentRound, isVoting, outcome, retryNonce]);
+
+  const handleSend = (event) => {
+    event.preventDefault();
+    if (!isMyTurn || isVoting || outcome || !input.trim()) return;
+    useGame.getState().addMessage({
+      sender: 'user',
+      text: input.trim(),
+      isUser: true,
+      name: userPlayer?.name || 'Player',
+    });
+    setInput('');
+    useGame.getState().nextTurn();
+  };
+
+  const handleVoteComplete = async (eliminatedId) => {
+    const state = useGame.getState();
+    if (!eliminatedId) {
+      state.addMessage({ sender: 'SYSTEM', text: 'No consensus reached. No one was eliminated.' });
+      state.nextRound();
+      return;
+    }
+
+    const eliminatedPlayer = state.players.find((player) => player.id === eliminatedId);
+    state.addMessage({
+      sender: 'SYSTEM',
+      text: `${eliminatedPlayer?.name || 'Unknown'} has been eliminated.`,
+    });
+
+    const controller = new AbortController();
+    summaryControllerRef.current = controller;
+    const roundMessages = state.messages.filter((message) => message.round === state.currentRound);
+    try {
+      const summary = await generateRoundSummary(
+        state.apiKey,
+        roundMessages,
+        eliminatedPlayer?.name || 'Unknown',
+        state.currentRound,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      useGame.getState().addRoundSummary(summary);
+    } catch (error) {
+      if (!controller.signal.aborted) console.warn('Failed to summarize round:', error);
+    } finally {
+      if (summaryControllerRef.current === controller) summaryControllerRef.current = null;
+    }
+
+    if (controller.signal.aborted) return;
+    const outcomeResult = getGameOutcome(state.mode, state.players, eliminatedId);
+    if (outcomeResult) {
+      useGame.getState().setOutcome(outcomeResult.outcome, outcomeResult.reason);
+    } else {
+      useGame.getState().nextRound();
+    }
+  };
+
+  const exitGame = () => {
+    botRequestRef.current?.controller.abort();
+    summaryControllerRef.current?.abort();
+    stopSpeaking();
+    useGame.getState().resetGame();
+  };
+
+  const scrollToLatest = () => {
+    shouldAutoScrollRef.current = true;
+    setHasNewMessages(false);
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: 'smooth' });
+  };
+
+  if (players.length === 0) return null;
+  if (outcome) return <ResultsScreen />;
+
   const voiceSupported = isSpeechSupported();
+  const activeName = players.find((player) => player.id === currentPlayerId)?.name || 'Waiting';
 
   return (
-    <div className="flex flex-col h-[600px] w-full max-w-4xl border border-green-800 bg-black/40 rounded-lg overflow-hidden relative">
-      {/* Header */}
-      <div className="p-4 border-b border-green-800 bg-black/60 flex justify-between items-center sticky top-0 z-20">
+    <section className="relative flex h-[calc(100dvh-3rem)] min-h-[420px] max-h-[700px] w-full flex-col overflow-hidden rounded-lg border border-green-800 bg-black/40 sm:h-[calc(100dvh-5rem)]">
+      <header className="sticky top-0 z-20 flex items-center justify-between gap-2 border-b border-green-800 bg-black/80 p-3 sm:p-4">
         <div>
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <Cpu size={20} /> ROUND_{currentRound}
-          </h2>
-          <p className="text-xs text-green-500/60">MODE: {mode}</p>
+          <h1 className="flex items-center gap-2 text-lg font-bold sm:text-xl">
+            <Cpu size={20} aria-hidden="true" /> ROUND_{currentRound}
+          </h1>
+          <p className="text-xs text-green-300">MODE: {mode}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           {voiceSupported && (
             <button
-              onClick={toggleVoice}
-              title={voiceEnabled ? 'Disable voice' : 'Enable voice'}
-              className={`p-2 border rounded transition-colors ${
-                voiceEnabled
-                  ? 'border-green-500 bg-green-900/30 text-green-300'
-                  : 'border-green-800 text-green-700 hover:text-green-400'
-              }`}
+              type="button"
+              onClick={useGame.getState().toggleVoice}
+              aria-label={voiceEnabled ? 'Disable voice' : 'Enable voice'}
+              aria-pressed={voiceEnabled}
+              className="rounded border border-green-600 p-2 text-green-300 hover:bg-green-900/40"
             >
-              {voiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+              {voiceEnabled ? <Volume2 size={16} aria-hidden="true" /> : <VolumeX size={16} aria-hidden="true" />}
             </button>
           )}
+          <button
+            type="button"
+            onClick={exitGame}
+            aria-label="Exit game"
+            className="rounded border border-red-700 p-2 text-red-300 hover:bg-red-950"
+          >
+            <LogOut size={16} aria-hidden="true" />
+          </button>
           <div className="flex flex-col items-end">
-            <div className={`text-2xl font-bold ${timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-green-500'}`}>
+            <div
+              role="timer"
+              aria-label={`${timeLeft} seconds remaining`}
+              className={`text-xl font-bold sm:text-2xl ${timeLeft < 10 ? 'animate-pulse text-red-400' : 'text-green-400'}`}
+            >
               {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
             </div>
-            <div className="text-xs text-right opacity-70">
-              ACTIVE_SPEAKER: <span className="text-white font-bold bg-green-900/50 px-1 rounded">{players.find(p => p.id === currentPlayerId)?.name || '...'}</span>
+            <div className="hidden text-right text-xs text-green-200 sm:block">
+              ACTIVE: <strong>{activeName}</strong>
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Player roster strip */}
-      <div className="px-3 py-2 border-b border-green-900/60 bg-black/40 flex gap-2 overflow-x-auto">
-        {players.map(p => {
-          const isCurrent = p.id === currentPlayerId;
-          const isDead = p.status !== 'ALIVE';
+      <ul aria-label="Players" className="flex gap-2 overflow-x-auto border-b border-green-900/60 bg-black/40 px-3 py-2">
+        {players.map((player) => {
+          const isCurrent = player.id === currentPlayerId;
+          const isDead = player.status !== 'ALIVE';
           return (
-            <div
-              key={p.id}
-              className={`flex items-center gap-1 px-2 py-1 rounded border text-[11px] whitespace-nowrap font-mono ${
+            <li
+              key={player.id}
+              aria-current={isCurrent ? 'true' : undefined}
+              className={`flex items-center gap-1 whitespace-nowrap rounded border px-2 py-1 font-mono text-[11px] ${
                 isDead
-                  ? 'border-red-900/50 text-red-700/60 line-through'
+                  ? 'border-red-700 text-red-300 line-through'
                   : isCurrent
-                    ? 'border-green-400 bg-green-900/40 text-green-200'
-                    : 'border-green-900/60 text-green-500/80'
+                    ? 'border-green-300 bg-green-900/40 text-green-100'
+                    : 'border-green-800 text-green-300'
               }`}
-              title={isDead ? 'Eliminated' : isCurrent ? 'Speaking now' : 'Alive'}
             >
-              <span>{p.avatar}</span>
-              <span>{p.name}</span>
-              {p.id === 'user' && <span className="text-yellow-400">★</span>}
-            </div>
+              <span aria-hidden="true">{player.avatar}</span>
+              <span>{player.name}{player.id === 'user' ? ' (you)' : ''}</span>
+              <span className="sr-only">{isDead ? 'Eliminated' : isCurrent ? 'Current speaker' : 'Alive'}</span>
+            </li>
           );
         })}
-      </div>
+      </ul>
 
       {apiError && (
-        <div className="px-4 py-2 bg-red-950/40 border-b border-red-800 text-xs text-red-300 flex items-center gap-2">
-          <AlertCircle size={14} /> {apiError}
+        <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-red-700 bg-red-950/60 px-4 py-2 text-xs text-red-200">
+          <AlertCircle size={14} aria-hidden="true" />
+          <span className="flex-1">{apiError}</span>
+          <button type="button" onClick={() => { setApiError(''); setRetryNonce((value) => value + 1); }} className="underline">Retry</button>
+          <button type="button" onClick={exitGame} className="underline">Key settings</button>
         </div>
       )}
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex flex-col ${msg.isUser ? 'items-end' : 'items-start'}`}>
-            <div className={`flex items-end gap-2 max-w-[80%] ${msg.isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-              {!msg.isUser && msg.sender !== 'SYSTEM' && (
-                <div className="w-8 h-8 rounded bg-green-900/30 border border-green-700 flex items-center justify-center text-lg">
-                  {msg.avatar || '?'}
-                </div>
+      <div
+        ref={messagesRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        onScroll={(event) => {
+          const region = event.currentTarget;
+          shouldAutoScrollRef.current = region.scrollHeight - region.scrollTop - region.clientHeight < 80;
+          if (shouldAutoScrollRef.current) setHasNewMessages(false);
+        }}
+        className="flex-1 space-y-4 overflow-y-auto p-3 sm:p-4"
+      >
+        {messages.map((message) => (
+          <article key={message.id} className={`flex flex-col ${message.isUser ? 'items-end' : 'items-start'}`}>
+            <div className={`flex max-w-[90%] items-end gap-2 sm:max-w-[80%] ${message.isUser ? 'flex-row-reverse' : ''}`}>
+              {!message.isUser && message.sender !== 'SYSTEM' && (
+                <span aria-hidden="true" className="flex h-8 w-8 items-center justify-center rounded border border-green-700 bg-green-900/30 text-lg">
+                  {message.avatar || '?'}
+                </span>
               )}
-
               <div className="flex flex-col">
-                {!msg.isUser && msg.sender !== 'SYSTEM' && <span className="text-[10px] text-green-500/50 mb-1 ml-1">{msg.name}</span>}
-
-                {msg.thought && <ThoughtBubble thought={msg.thought} isVisible={true} />}
-
-                <div className={`p-3 rounded-lg text-sm ${
-                  msg.sender === 'SYSTEM'
-                    ? 'bg-yellow-900/10 border border-yellow-800/40 text-yellow-300/80 italic text-xs'
-                    : msg.isUser
-                      ? 'bg-green-700/20 border border-green-500/50 text-green-100 rounded-tr-none'
-                      : 'bg-zinc-800/40 border border-zinc-700 text-green-300 rounded-tl-none'
+                <span className="sr-only">{message.name || (message.sender === 'SYSTEM' ? 'System' : 'Player')} says:</span>
+                {!message.isUser && message.sender !== 'SYSTEM' && <span className="mb-1 ml-1 text-[11px] text-green-300">{message.name}</span>}
+                <div className={`rounded-lg p-3 text-sm ${
+                  message.sender === 'SYSTEM'
+                    ? 'border border-yellow-700 bg-yellow-900/20 text-xs italic text-yellow-200'
+                    : message.isUser
+                      ? 'rounded-tr-none border border-green-500 bg-green-700/20 text-green-100'
+                      : 'rounded-tl-none border border-zinc-600 bg-zinc-800/60 text-green-200'
                 }`}>
-                  {msg.text}
+                  {message.text}
                 </div>
               </div>
             </div>
-          </div>
+          </article>
         ))}
-        {isThinking && (
-          <div className="text-xs text-green-500/50 animate-pulse ml-10">
-            [ NETWORK TRAFFIC DETECTED ]
-          </div>
-        )}
-        <div ref={bottomRef} />
+        {isThinking && <div role="status" className="ml-10 animate-pulse text-xs text-green-300">[ NETWORK TRAFFIC DETECTED ]</div>}
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t border-green-800 bg-black/60 flex gap-2 relative">
-        {!isMyTurn && (
-          <div className="absolute inset-0 bg-black/80 z-20 flex items-center justify-center text-green-500/50 text-sm italic cursor-not-allowed">
-            WAITING FOR TURN...
-          </div>
-        )}
+      {hasNewMessages && (
+        <button type="button" onClick={scrollToLatest} className="mx-auto mb-2 rounded border border-green-600 bg-black px-3 py-1 text-xs text-green-200">
+          NEW_MESSAGES
+        </button>
+      )}
+
+      <form onSubmit={handleSend} className="relative flex gap-2 border-t border-green-800 bg-black/80 p-3 sm:p-4">
+        <label htmlFor="chat-message" className="sr-only">Chat message</label>
         <input
+          ref={inputRef}
+          id="chat-message"
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isMyTurn ? "Your turn..." : "Waiting..."}
-          disabled={!isMyTurn || isVoting}
-          className="flex-1 bg-black/50 border border-green-700 px-4 py-3 rounded text-green-400 focus:outline-none focus:border-green-400 placeholder-green-800 font-mono disabled:opacity-50"
-          autoFocus={isMyTurn}
+          onChange={(event) => setInput(event.target.value)}
+          maxLength={MAX_MESSAGE_LENGTH}
+          placeholder={isMyTurn ? 'Your turn...' : `Waiting for ${activeName}...`}
+          disabled={!isMyTurn || isVoting || isThinking}
+          className="min-w-0 flex-1 rounded border border-green-700 bg-black/50 px-3 py-3 font-mono text-green-300 placeholder-green-700 focus:border-green-300 focus:outline-none disabled:opacity-50 sm:px-4"
         />
         <button
-          onClick={handleSend}
-          disabled={!isMyTurn || isVoting}
-          className="p-3 bg-green-800/20 border border-green-600 rounded hover:bg-green-700/40 transition-colors text-green-400 disabled:opacity-50"
+          type="submit"
+          aria-label="Send message"
+          disabled={!isMyTurn || isVoting || isThinking || !input.trim()}
+          className="rounded border border-green-600 bg-green-800/20 p-3 text-green-300 hover:bg-green-700/40 disabled:opacity-50"
         >
-          <Send size={20} />
+          <Send size={20} aria-hidden="true" />
         </button>
-      </div>
+      </form>
 
-      {isVoting && <VotingOverlay onVoteComplete={handleVoteComplete} />}
-    </div>
+      {isVoting && <VotingOverlay onVoteComplete={handleVoteComplete} onExit={exitGame} />}
+    </section>
   );
 };
 

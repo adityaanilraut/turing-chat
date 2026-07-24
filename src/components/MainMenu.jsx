@@ -1,87 +1,104 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { Shield, Smartphone } from 'lucide-react';
 import useGame from '../engine/gameStore';
-import { Shield, Smartphone, Terminal, Lock } from 'lucide-react';
 
 const MainMenu = () => {
-  const { apiKey, setApiKey, startGame } = useGame();
+  const { apiKey, setApiKey, clearApiKey, startGame } = useGame();
   const [localKey, setLocalKey] = useState(apiKey);
   const [showKey, setShowKey] = useState(false);
+  const [message, setMessage] = useState('');
 
-  const handleSaveKey = () => {
-    setApiKey(localKey);
+  const beginGame = (mode) => {
+    const key = localKey.trim();
+    if (!key) {
+      setMessage('Enter an OpenAI API key before starting.');
+      return;
+    }
+    setApiKey(key);
+    startGame(mode);
+  };
+
+  const pasteKey = async () => {
+    try {
+      setLocalKey((await navigator.clipboard.readText()).trim());
+      setMessage('Key pasted. It will be kept for this browser session only.');
+    } catch (error) {
+      console.warn('Clipboard permission denied:', error);
+      setMessage('Clipboard permission was denied. Type or paste the key manually.');
+    }
+  };
+
+  const clearKey = () => {
+    clearApiKey();
+    setLocalKey('');
+    setMessage('Stored session key cleared.');
   };
 
   return (
-    <div className="flex flex-col gap-8 text-center animate-in fade-in zoom-in duration-500">
-      <div>
-        <h1 className="text-6xl font-bold glow flicker mb-2">TURING_CHAT_V.2.0</h1>
-        <p className="text-xl text-green-400 opacity-80">Social Deduction // AI Protocol</p>
-      </div>
+    <div className="flex flex-col gap-6 text-center sm:gap-8">
+      <header>
+        <h1 className="break-words text-3xl font-bold glow flicker sm:text-5xl lg:text-6xl">TURING_CHAT_V.2.0</h1>
+        <p className="mt-2 text-base text-green-300 sm:text-xl">Social Deduction // AI Protocol</p>
+      </header>
 
-      <div className="bg-zinc-900/50 p-6 rounded border border-green-900 text-left">
-        <label className="block text-sm mb-2 text-green-300">OPENAI_API_KEY_REQUIRED</label>
-        <div className="flex gap-2">
-          <input 
-            type={showKey ? "text" : "password"} 
+      <section aria-labelledby="api-key-title" className="rounded border border-green-800 bg-zinc-900/60 p-4 text-left sm:p-6">
+        <h2 id="api-key-title" className="mb-2 text-sm text-green-200">OPENAI_API_KEY_REQUIRED</h2>
+        <label htmlFor="openai-key" className="sr-only">OpenAI API key</label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="openai-key"
+            type={showKey ? 'text' : 'password'}
             value={localKey}
-            onChange={(e) => setLocalKey(e.target.value)}
+            onChange={(event) => { setLocalKey(event.target.value); setMessage(''); }}
             placeholder="sk-..."
-            className="flex-1 bg-black border border-green-700 px-3 py-2 text-green-500 focus:outline-none focus:border-green-400 font-mono z-20 relative"
+            autoComplete="off"
+            spellCheck="false"
+            className="min-w-0 flex-1 border border-green-700 bg-black px-3 py-2 font-mono text-green-300 focus:border-green-300 focus:outline-none"
           />
-          <button 
-            onClick={async () => {
-              try {
-                const text = await navigator.clipboard.readText();
-                setLocalKey(text);
-              } catch (err) {
-                console.error('Failed to read clipboard', err);
-                alert("Clipboard permission denied. Please type manually.");
-              }
-            }}
-            className="px-3 border border-green-700 hover:bg-green-900/40 text-xs"
-            title="Paste from Clipboard"
-          >
-            NOTEPAD
-          </button>
-          <button 
-            onClick={() => setShowKey(!showKey)}
-            className="px-3 border border-green-700 hover:bg-green-900/40"
-          >
-            {showKey ? "HIDE" : "SHOW"}
-          </button>
-          <button 
-            onClick={handleSaveKey}
-            className="px-4 bg-green-900/40 border border-green-600 hover:bg-green-700 hover:text-white transition-colors"
-          >
-            SAVE
-          </button>
+          <div className="grid grid-cols-3 gap-2 sm:flex">
+            <button type="button" onClick={pasteKey} className="border border-green-700 px-3 py-2 text-xs hover:bg-green-900/40">PASTE</button>
+            <button
+              type="button"
+              onClick={() => setShowKey((visible) => !visible)}
+              aria-pressed={showKey}
+              className="border border-green-700 px-3 py-2 text-xs hover:bg-green-900/40"
+            >
+              {showKey ? 'HIDE' : 'SHOW'}
+            </button>
+            <button type="button" onClick={clearKey} className="border border-red-800 px-3 py-2 text-xs text-red-200 hover:bg-red-950">CLEAR</button>
+          </div>
         </div>
-        <p className="text-xs text-stone-500 mt-2">Key is stored locally. If paste fails, type manually or check permissions.</p>
-      </div>
+        {message && <p role="status" className="mt-2 text-xs text-yellow-200">{message}</p>}
+        <p className="mt-2 text-xs text-gray-300">
+          The key stays in session storage until this tab session ends and is sent directly to OpenAI with game messages. Use a restricted key with a spending limit.
+        </p>
+      </section>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <button 
-          onClick={() => startGame('IMPOSTOR')}
-          disabled={!apiKey}
-          className="group relative p-8 border border-green-600 hover:bg-green-900/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+      <section aria-label="Game modes" className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => beginGame('IMPOSTOR')}
+          disabled={!localKey.trim()}
+          className="group relative border border-green-600 p-5 transition-colors hover:bg-green-900/20 disabled:cursor-not-allowed disabled:opacity-40 sm:p-8"
         >
-          <div className="absolute top-2 right-2 opacity-50"><Smartphone size={24} /></div>
-          <h2 className="text-2xl font-bold mb-2 group-hover:text-white">IMPOSTOR_PROTOCOL</h2>
-          <p className="text-sm opacity-70">Role: Human Impostor</p>
-          <p className="text-xs mt-2 text-green-300">"Blend in with the Bots"</p>
+          <Smartphone aria-hidden="true" className="absolute right-2 top-2 opacity-60" size={24} />
+          <h2 className="mb-2 break-words text-xl font-bold group-hover:text-white sm:text-2xl">IMPOSTOR_PROTOCOL</h2>
+          <p className="text-sm text-green-200">Role: Human Impostor</p>
+          <p className="mt-2 text-xs text-green-300">Blend in with the bots</p>
         </button>
 
-        <button 
-          onClick={() => startGame('DEFENSE')}
-          disabled={!apiKey}
-          className="group relative p-8 border border-green-600 hover:bg-green-900/20 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+        <button
+          type="button"
+          onClick={() => beginGame('DEFENSE')}
+          disabled={!localKey.trim()}
+          className="group relative border border-green-600 p-5 transition-colors hover:bg-green-900/20 disabled:cursor-not-allowed disabled:opacity-40 sm:p-8"
         >
-          <div className="absolute top-2 right-2 opacity-50"><Shield size={24} /></div>
-          <h2 className="text-2xl font-bold mb-2 group-hover:text-white">HUMANITY_DEFENSE</h2>
-          <p className="text-sm opacity-70">Role: Human Defender</p>
-          <p className="text-xs mt-2 text-green-300">"Prove your existence"</p>
+          <Shield aria-hidden="true" className="absolute right-2 top-2 opacity-60" size={24} />
+          <h2 className="mb-2 break-words text-xl font-bold group-hover:text-white sm:text-2xl">HUMANITY_DEFENSE</h2>
+          <p className="text-sm text-green-200">Role: Human Defender</p>
+          <p className="mt-2 text-xs text-green-300">Prove your existence</p>
         </button>
-      </div>
+      </section>
     </div>
   );
 };

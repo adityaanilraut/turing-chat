@@ -16,7 +16,7 @@ You're a human trying to prove your existence. Convince the group you're real wh
 
 ## 🤖 How It Works
 
-1. **Enter your OpenAI API key** (stored locally, never sent to any server)
+1. **Enter your OpenAI API key** (kept for the browser session and sent directly to OpenAI)
 2. **Choose a game mode**
 3. **Chat with 4 AI bots** - each with unique personalities
 4. **5 minutes on the clock** - make your case
@@ -52,7 +52,6 @@ Toggle the speaker icon in the chat header to have bot messages spoken aloud via
 - **Vite 7** - Build tool
 - **Zustand** - State management
 - **Tailwind CSS** - Styling
-- **Framer Motion** - Animations
 - **OpenAI API** - `gpt-5.4-mini` for bot responses, voting, and round summaries
 - **Web Speech API** - Optional TTS for bot messages
 - **Lucide React** - Icons
@@ -61,7 +60,7 @@ Toggle the speaker icon in the chat header to have bot messages spoken aloud via
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20.19+ or 22.12+
 - OpenAI API key ([get one here](https://platform.openai.com/api-keys))
 
 ### Installation
@@ -94,11 +93,11 @@ src/
 │   ├── Layout.jsx          # CRT terminal wrapper
 │   ├── MainMenu.jsx        # Start screen & API key input
 │   ├── ResultsScreen.jsx   # Win/lose screen
-│   ├── ThoughtBubble.jsx   # Bot internal thoughts display
 │   └── VotingOverlay.jsx   # Elimination voting UI
 ├── engine/
 │   ├── gameStore.js        # Zustand state management
 │   ├── openai.js           # OpenAI API integration
+│   ├── gameRules.js        # Voting and win/loss rules
 │   ├── personalities.js    # Bot personality + mode definitions
 │   └── speech.js           # Web Speech API wrapper for TTS
 ├── App.jsx
@@ -109,11 +108,20 @@ src/
 ## ⚙️ Configuration
 
 The game uses your OpenAI API key for bot responses. The key is:
-- Stored in `localStorage` 
-- Never sent to any external server
-- Used client-side only (via `dangerouslyAllowBrowser: true`)
+- Stored in `sessionStorage`, not persisted indefinitely
+- Sent directly from the browser to OpenAI with game messages
+- Cleared with the setup-screen button or when the browser session ends
+- Used client-side via `dangerouslyAllowBrowser: true`
 
-**Note:** API calls are made directly from the browser. For production use, consider proxying through a backend.
+Use a restricted API key with a spending limit. For a public production deployment, proxy requests through a rate-limited backend and keep credentials server-side.
+
+## ✅ Verification
+
+```bash
+npm run lint
+npm test
+npm run build
+```
 
 ## 🎨 Aesthetics
 
@@ -130,4 +138,3 @@ MIT
 ---
 
 *"Connection Established. Protocol Initiated."*
-

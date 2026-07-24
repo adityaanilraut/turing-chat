@@ -1,14 +1,12 @@
-import React from 'react';
-
 const Layout = ({ children }) => {
   return (
-    <div className="min-h-screen bg-terminal-black text-terminal-green font-mono p-4 flex flex-col items-center justify-center relative overflow-hidden">
-      <div className="scanlines" />
-      <div className="absolute inset-0 bg-gradient-to-b from-terminal-dim/20 to-transparent pointer-events-none" />
-      <div className="max-w-4xl w-full z-10 glass-panel border border-green-800/50 bg-black/80 rounded-lg shadow-[0_0_20px_rgba(34,197,94,0.2)] p-6 backdrop-blur-sm relative">
-         {children}
+    <main className="relative flex min-h-dvh flex-col items-center justify-start bg-terminal-black p-2 font-mono text-terminal-green sm:p-4 md:justify-center">
+      <div className="scanlines" aria-hidden="true" />
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-terminal-dim/20 to-transparent" />
+      <div className="relative z-10 w-full max-w-4xl rounded-lg border border-green-800/50 bg-black/80 p-3 shadow-[0_0_20px_rgba(34,197,94,0.2)] backdrop-blur-sm sm:p-6">
+        {children}
       </div>
-    </div>
+    </main>
   );
 };
 

@@ -9,8 +9,9 @@
 }
 
 body {
-  @apply bg-black text-green-500 font-mono overflow-hidden;
+  @apply overflow-x-hidden bg-black font-mono text-green-500;
   background-color: var(--black);
+  min-width: 320px;
 }
 
 /* CRT Scanline Effect */
@@ -83,4 +84,15 @@ body {
 
 .flicker {
   animation: flicker 4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

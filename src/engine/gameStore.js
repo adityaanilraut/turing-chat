@@ -1,6 +1,31 @@
 import { create } from 'zustand';
 import { generateBots } from './personalities';
 
+export const ROUND_DURATION_MS = 5 * 60 * 1000;
+
+const readStorage = (type, key) => {
+  try {
+    return typeof window === 'undefined' ? null : window[type].getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+const writeStorage = (type, key, value) => {
+  try {
+    window[type].setItem(key, value);
+  } catch {
+    // Storage is optional; state still works for the current page session.
+  }
+};
+
+try {
+  // Older versions persisted credentials indefinitely.
+  window.localStorage.removeItem('openai_key');
+} catch {
+  // Ignore unavailable browser storage.
+}
+
 const generateUserName = () => {
   const NAMES_PREFIX = ['Neo', 'Glitch', 'User', 'Anon', 'System', 'Data', 'Byte', 'Pixel', 'Void', 'Null', 'Echo', 'Cyber', 'Flux', 'Zero'];
   const NAMES_SUFFIX = ['_77', '_X', '_01', '.exe', '_Core', '_V2', '404', '_Log', '_Watcher', '_Ghost'];
@@ -10,7 +35,7 @@ const generateUserName = () => {
 };
 
 const useGame = create((set, get) => ({
-  apiKey: localStorage.getItem('openai_key') || '',
+  apiKey: readStorage('sessionStorage', 'openai_key') || '',
   mode: 'MENU',
   players: [],
   messages: [],
@@ -21,9 +46,10 @@ const useGame = create((set, get) => ({
   turnQueue: [],
   activePlayerIndex: 0,
   timeLeft: 60,
+  roundDeadline: null,
   isVoting: false,
 
-  voiceEnabled: localStorage.getItem('voice_enabled') === 'true',
+  voiceEnabled: readStorage('localStorage', 'voice_enabled') === 'true',
 
   roundSummaries: [],
 
@@ -32,14 +58,19 @@ const useGame = create((set, get) => ({
   outcomeReason: '',
 
   setApiKey: (key) => {
-    localStorage.setItem('openai_key', key);
-    set({ apiKey: key });
+    const trimmedKey = key.trim();
+    writeStorage('sessionStorage', 'openai_key', trimmedKey);
+    set({ apiKey: trimmedKey });
+  },
+
+  clearApiKey: () => {
+    writeStorage('sessionStorage', 'openai_key', '');
+    set({ apiKey: '' });
   },
 
   startGame: (selectedMode) => {
-    const bots = generateBots(4, selectedMode);
-
     const userName = generateUserName();
+    const bots = generateBots(4, selectedMode, new Set([userName]));
     const user = { id: 'user', name: userName, isHuman: true, avatar: '👤', status: 'ALIVE' };
 
     const allPlayers = [user, ...bots].sort(() => Math.random() - 0.5);
@@ -52,12 +83,13 @@ const useGame = create((set, get) => ({
       mode: selectedMode,
       players: allPlayers,
       userPlayer: user,
-      messages: [{ id: 0, sender: 'SYSTEM', text: intro }],
+      messages: [{ id: 0, sender: 'SYSTEM', text: intro, round: 1 }],
       currentRound: 1,
       isThinking: false,
       turnQueue: allPlayers.map(p => p.id),
       activePlayerIndex: 0,
       timeLeft: 300,
+      roundDeadline: Date.now() + ROUND_DURATION_MS,
       isVoting: false,
       roundSummaries: [],
       outcome: null,
@@ -66,22 +98,26 @@ const useGame = create((set, get) => ({
   },
 
   addMessage: (msg) => set((state) => ({
-    messages: [...state.messages, { ...msg, id: state.messages.length }]
+    messages: [...state.messages, {
+      ...msg,
+      id: state.messages.length,
+      round: msg.round ?? state.currentRound,
+    }]
   })),
 
   nextTurn: () => set((state) => {
+    if (state.turnQueue.length === 0) return state;
     const nextIndex = (state.activePlayerIndex + 1) % state.turnQueue.length;
     return { activePlayerIndex: nextIndex };
   }),
 
-  setTimeLeft: (time) => set({ timeLeft: time }),
+  setTimeLeft: (time) => set((state) => state.timeLeft === time ? state : { timeLeft: time }),
 
-  startVoting: () => set({ isVoting: true }),
-  endVoting: () => set({ isVoting: false }),
+  startVoting: () => set({ isVoting: true, isThinking: false, timeLeft: 0 }),
 
   toggleVoice: () => set((state) => {
     const newValue = !state.voiceEnabled;
-    localStorage.setItem('voice_enabled', newValue.toString());
+    writeStorage('localStorage', 'voice_enabled', newValue.toString());
     return { voiceEnabled: newValue };
   }),
 
@@ -94,15 +130,23 @@ const useGame = create((set, get) => ({
     return state.roundSummaries.join('\n\n');
   },
 
-  setOutcome: (outcome, reason = '') => set({ outcome, outcomeReason: reason }),
+  setOutcome: (outcome, reason = '') => set({
+    outcome,
+    outcomeReason: reason,
+    isVoting: false,
+    isThinking: false,
+  }),
 
   nextRound: () => set((state) => {
     const alivePlayers = state.players.filter(p => p.status === 'ALIVE');
     return {
       currentRound: state.currentRound + 1,
       timeLeft: 300,
+      roundDeadline: Date.now() + ROUND_DURATION_MS,
       activePlayerIndex: 0,
-      turnQueue: alivePlayers.map(p => p.id)
+      turnQueue: alivePlayers.map(p => p.id),
+      isVoting: false,
+      isThinking: false,
     };
   }),
 
@@ -132,6 +176,7 @@ const useGame = create((set, get) => ({
       turnQueue: [],
       activePlayerIndex: 0,
       timeLeft: 60,
+      roundDeadline: null,
       isVoting: false,
       roundSummaries: [],
       outcome: null,
